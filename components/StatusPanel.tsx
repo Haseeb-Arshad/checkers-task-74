@@ -2,207 +2,162 @@
 
 import type { ReactNode } from "react";
 
-type StatusVariant =
-  | "idle"
-  | "loading"
-  | "empty"
-  | "error"
-  | "success"
-  | "complete"
-  | "paused";
+type StatusState = "empty" | "error" | "completion" | "loading" | "info";
 
-export interface StatusPanelProps {
-  variant?: StatusVariant;
-  title: string;
-  description?: string;
-  details?: ReactNode;
-  actionLabel?: string;
-  secondaryActionLabel?: string;
-  onAction?: () => void;
-  onSecondaryAction?: () => void;
+type ActionConfig = {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+};
+
+export type StatusPanelProps = {
+  state: StatusState;
+  title?: string;
+  message?: string;
+  details?: string;
+  primaryAction?: ActionConfig;
+  secondaryAction?: ActionConfig;
+  icon?: ReactNode;
   className?: string;
-  compact?: boolean;
   children?: ReactNode;
-}
+};
 
-interface VariantConfig {
-  icon: string;
-  ring: string;
-  bg: string;
-  iconBg: string;
-  title: string;
-  description: string;
-  button: string;
-}
-
-const variantMap: Record<StatusVariant, VariantConfig> = {
-  idle: {
-    icon: "🎮",
-    ring: "ring-slate-700/40",
-    bg: "from-slate-900/70 to-slate-800/60",
-    iconBg: "bg-slate-700/60",
-    title: "Ready to Play",
-    description: "Start a new game, load a save, or pick a challenge.",
-    button: "bg-slate-200 text-slate-900 hover:bg-white",
-  },
-  loading: {
-    icon: "⏳",
-    ring: "ring-cyan-600/40",
-    bg: "from-cyan-900/40 to-slate-900/70",
-    iconBg: "bg-cyan-600/30",
-    title: "Loading",
-    description: "Preparing board state and syncing game data.",
-    button: "bg-cyan-300 text-slate-900 hover:bg-cyan-200",
-  },
+const STATE_STYLES: Record<
+  StatusState,
+  {
+    container: string;
+    ring: string;
+    defaultIcon: string;
+    defaultTitle: string;
+    defaultMessage: string;
+  }
+> = {
   empty: {
-    icon: "🧩",
-    ring: "ring-violet-600/40",
-    bg: "from-violet-900/30 to-slate-900/70",
-    iconBg: "bg-violet-600/30",
-    title: "No Matches Yet",
-    description: "There are no active rounds. Start one and make your first move.",
-    button: "bg-violet-300 text-slate-900 hover:bg-violet-200",
+    container:
+      "bg-slate-900/70 border-slate-700 text-slate-100 shadow-slate-950/40",
+    ring: "ring-slate-600/30",
+    defaultIcon: "🧩",
+    defaultTitle: "Nothing here yet",
+    defaultMessage:
+      "Start a new match or load a saved game to jump back into the board.",
   },
   error: {
-    icon: "⚠️",
-    ring: "ring-rose-600/45",
-    bg: "from-rose-900/40 to-slate-900/80",
-    iconBg: "bg-rose-600/30",
-    title: "Something Went Wrong",
-    description: "The game hit an issue. Retry the action or reset the board state.",
-    button: "bg-rose-300 text-slate-900 hover:bg-rose-200",
+    container:
+      "bg-rose-950/60 border-rose-700/70 text-rose-50 shadow-rose-950/40",
+    ring: "ring-rose-500/20",
+    defaultIcon: "⚠️",
+    defaultTitle: "Something went wrong",
+    defaultMessage:
+      "We hit an unexpected issue. You can retry safely without losing your progress.",
   },
-  success: {
-    icon: "✅",
-    ring: "ring-emerald-600/45",
-    bg: "from-emerald-900/35 to-slate-900/80",
-    iconBg: "bg-emerald-600/35",
-    title: "Action Completed",
-    description: "Your move was saved and the board is up to date.",
-    button: "bg-emerald-300 text-slate-900 hover:bg-emerald-200",
+  completion: {
+    container:
+      "bg-emerald-950/60 border-emerald-700/70 text-emerald-50 shadow-emerald-950/40",
+    ring: "ring-emerald-500/20",
+    defaultIcon: "🏆",
+    defaultTitle: "Game complete",
+    defaultMessage:
+      "Great round! Your result has been recorded. Start another game when you are ready.",
   },
-  complete: {
-    icon: "🏆",
-    ring: "ring-amber-500/45",
-    bg: "from-amber-900/30 to-slate-900/80",
-    iconBg: "bg-amber-600/30",
-    title: "Match Complete",
-    description: "Great game. Review stats, then queue up your next showdown.",
-    button: "bg-amber-300 text-slate-900 hover:bg-amber-200",
+  loading: {
+    container:
+      "bg-indigo-950/60 border-indigo-700/70 text-indigo-50 shadow-indigo-950/40",
+    ring: "ring-indigo-500/20",
+    defaultIcon: "⏳",
+    defaultTitle: "Preparing game data",
+    defaultMessage:
+      "We are setting up your board and syncing preferences. This should only take a moment.",
   },
-  paused: {
-    icon: "⏸️",
-    ring: "ring-indigo-500/45",
-    bg: "from-indigo-900/35 to-slate-900/80",
-    iconBg: "bg-indigo-600/30",
-    title: "Game Paused",
-    description: "Take a breath. Resume anytime from this exact board state.",
-    button: "bg-indigo-300 text-slate-900 hover:bg-indigo-200",
+  info: {
+    container:
+      "bg-cyan-950/60 border-cyan-700/70 text-cyan-50 shadow-cyan-950/40",
+    ring: "ring-cyan-500/20",
+    defaultIcon: "ℹ️",
+    defaultTitle: "Heads up",
+    defaultMessage: "A quick update about the current game state.",
   },
 };
 
-function cx(...parts: Array<string | undefined | false>): string {
-  return parts.filter(Boolean).join(" ");
+function SpinnerIcon() {
+  return (
+    <span
+      className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-current border-t-transparent"
+      aria-hidden="true"
+    />
+  );
 }
 
-export function StatusPanel({
-  variant = "idle",
+export default function StatusPanel({
+  state,
   title,
-  description,
+  message,
   details,
-  actionLabel,
-  secondaryActionLabel,
-  onAction,
-  onSecondaryAction,
+  primaryAction,
+  secondaryAction,
+  icon,
   className,
-  compact = false,
   children,
 }: StatusPanelProps) {
-  const config = variantMap[variant];
+  const style = STATE_STYLES[state];
+  const resolvedTitle = title ?? style.defaultTitle;
+  const resolvedMessage = message ?? style.defaultMessage;
 
   return (
     <section
-      role={variant === "error" ? "alert" : "status"}
-      aria-live={variant === "error" ? "assertive" : "polite"}
-      className={cx(
-        "relative overflow-hidden rounded-2xl border border-white/10 ring-1",
-        config.ring,
-        "bg-gradient-to-br backdrop-blur-sm",
-        config.bg,
-        compact ? "p-4" : "p-6 sm:p-8",
-        className,
-      )}
+      role={state === "error" ? "alert" : "status"}
+      aria-live={state === "error" ? "assertive" : "polite"}
+      className={[
+        "w-full rounded-2xl border p-5 sm:p-6",
+        "shadow-xl ring-1 transition-all duration-200",
+        style.container,
+        style.ring,
+        className ?? "",
+      ].join(" ")}
     >
-      <div className="pointer-events-none absolute inset-0 opacity-40 [background:radial-gradient(circle_at_top_right,rgba(255,255,255,0.2),transparent_45%)]" />
-
-      <div className="relative z-10 flex flex-col gap-4">
-        <div className="flex items-start gap-3">
-          <div
-            className={cx(
-              "grid h-10 w-10 place-items-center rounded-xl text-lg shadow-lg",
-              config.iconBg,
-            )}
-            aria-hidden="true"
-          >
-            {config.icon}
-          </div>
-
-          <div className="space-y-1">
-            <h3 className="text-base font-semibold text-white sm:text-lg">
-              {title || config.title}
-            </h3>
-            <p className="text-sm leading-relaxed text-slate-200/90">
-              {description || config.description}
-            </p>
-          </div>
+      <div className="flex items-start gap-4">
+        <div className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-black/20 text-2xl">
+          {icon ?? (state === "loading" ? <SpinnerIcon /> : <span>{style.defaultIcon}</span>)}
         </div>
 
-        {details ? (
-          <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-sm text-slate-200">
-            {details}
-          </div>
-        ) : null}
+        <div className="min-w-0 flex-1">
+          <h3 className="text-lg font-semibold tracking-tight">{resolvedTitle}</h3>
+          <p className="mt-1 text-sm leading-relaxed text-white/85">{resolvedMessage}</p>
 
-        {children ? <div>{children}</div> : null}
+          {details ? (
+            <p className="mt-2 rounded-lg border border-white/15 bg-black/20 px-3 py-2 text-xs leading-relaxed text-white/80">
+              {details}
+            </p>
+          ) : null}
 
-        {(actionLabel || secondaryActionLabel) && (
-          <div className="flex flex-wrap items-center gap-2 pt-1">
-            {actionLabel ? (
-              <button
-                type="button"
-                onClick={onAction}
-                className={cx(
-                  "inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold",
-                  "transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900",
-                  config.button,
-                  onAction ? "cursor-pointer" : "cursor-not-allowed opacity-70",
-                )}
-                disabled={!onAction}
-              >
-                {actionLabel}
-              </button>
-            ) : null}
+          {children ? <div className="mt-3 text-sm text-white/90">{children}</div> : null}
 
-            {secondaryActionLabel ? (
-              <button
-                type="button"
-                onClick={onSecondaryAction}
-                className={cx(
-                  "inline-flex items-center justify-center rounded-lg border border-white/25 bg-white/5 px-4 py-2",
-                  "text-sm font-medium text-slate-100 transition-colors duration-200",
-                  "hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60",
-                  onSecondaryAction ? "cursor-pointer" : "cursor-not-allowed opacity-70",
-                )}
-                disabled={!onSecondaryAction}
-              >
-                {secondaryActionLabel}
-              </button>
-            ) : null}
-          </div>
-        )}
+          {(primaryAction || secondaryAction) && (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {primaryAction ? (
+                <button
+                  type="button"
+                  onClick={primaryAction.onClick}
+                  disabled={primaryAction.disabled}
+                  className="inline-flex items-center rounded-lg bg-white px-3.5 py-2 text-sm font-semibold text-slate-900 transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {primaryAction.label}
+                </button>
+              ) : null}
+
+              {secondaryAction ? (
+                <button
+                  type="button"
+                  onClick={secondaryAction.onClick}
+                  disabled={secondaryAction.disabled}
+                  className="inline-flex items-center rounded-lg border border-white/35 px-3.5 py-2 text-sm font-medium text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {secondaryAction.label}
+                </button>
+              ) : null}
+            </div>
+          )}
+        </div>
       </div>
     </section>
   );
 }
-
-export default StatusPanel;

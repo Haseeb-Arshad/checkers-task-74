@@ -1,162 +1,185 @@
-export type PlayerColor = "red" | "black";
+export const BOARD_SIZE = 8;
 
-export interface CheckerPiece {
+export type PieceColor = "red" | "black";
+export type PieceRank = "man" | "king";
+
+export type Piece = {
   id: string;
-  color: PlayerColor;
-  king: boolean;
-}
+  color: PieceColor;
+  rank: PieceRank;
+};
 
-export type Cell = CheckerPiece | null;
-export type Board = Cell[][];
+export type BoardCell = Piece | null;
+export type BoardState = BoardCell[][];
 
-export interface Move {
-  fromRow: number;
-  fromCol: number;
-  toRow: number;
-  toCol: number;
-  captured?: { row: number; col: number };
-}
+export type Position = {
+  row: number;
+  col: number;
+};
 
-export interface AppliedMoveResult {
-  board: Board;
-  promoted: boolean;
-  captured: boolean;
-  nextTurn: PlayerColor;
-}
+export type Move = {
+  from: Position;
+  to: Position;
+  captures: Position[];
+};
 
-export interface GameState {
-  board: Board;
-  currentTurn: PlayerColor;
-  selected: { row: number; col: number } | null;
-  validMoves: Move[];
-  moveHistory: Move[];
-  redoStack: Move[];
-  winner: PlayerColor | "draw" | null;
-  startedAt: number;
-  elapsedSeconds: number;
-  mode: string;
-  theme: string;
-}
+export type GameMode = "single-ai" | "local" | "online" | "puzzle";
 
-export interface GameStats {
-  totalGames: number;
+export type ThemePreset = {
+  id: "minimal" | "dark" | "playful" | "classic";
+  label: string;
+  description: string;
+  palette: {
+    boardLight: string;
+    boardDark: string;
+    boardBorder: string;
+    redPiece: string;
+    blackPiece: string;
+    accent: string;
+  };
+};
+
+export type CheckersStats = {
+  played: number;
   redWins: number;
   blackWins: number;
   draws: number;
-  longestWinStreak: number;
-  currentWinStreak: number;
-  averageGameDurationSeconds: number;
-}
+  fastestWinSeconds: number | null;
+  longestGameSeconds: number | null;
+};
 
-export interface ThemeOption {
-  id: string;
-  name: string;
-  boardClass: string;
-  pieceRedClass: string;
-  pieceBlackClass: string;
-}
-
-export interface ModeOption {
-  id: string;
-  name: string;
-  description: string;
-}
-
-export interface PuzzleChallenge {
+export type PuzzleDefinition = {
   id: string;
   title: string;
-  goal: string;
+  objective: string;
   difficulty: 1 | 2 | 3 | 4 | 5;
-}
+  turn: PieceColor;
+  board: BoardState;
+};
 
-export const BOARD_SIZE = 8;
-export const STORAGE_KEY = "checkers.autosave.v1";
+export const STORAGE_KEYS = {
+  gameState: "checkers.game-state.v1",
+  stats: "checkers.stats.v1",
+  settings: "checkers.settings.v1",
+} as const;
 
-export const MODE_OPTIONS: ModeOption[] = [
+export const GAME_MODES: Array<{ id: GameMode; label: string; description: string; enabled: boolean }> = [
   {
     id: "single-ai",
-    name: "Single-player vs AI",
-    description: "Practice against a local AI using weighted random move selection.",
+    label: "Single-player vs AI",
+    description: "Play against a lightweight built-in bot.",
+    enabled: true,
   },
   {
-    id: "local-mp",
-    name: "Local multiplayer",
-    description: "Two players on one device. Great for quick couch matches.",
+    id: "local",
+    label: "Local multiplayer",
+    description: "Two players on one device with alternating turns.",
+    enabled: true,
   },
   {
-    id: "online-mp",
-    name: "Online multiplayer (coming soon)",
-    description: "Plumbing-ready mode for future real-time sessions.",
+    id: "online",
+    label: "Online multiplayer",
+    description: "Multiplayer-ready shell. Matchmaking can be wired later.",
+    enabled: false,
   },
   {
     id: "puzzle",
-    name: "Puzzle / challenge mode",
-    description: "Solve tactical board setups with limited moves.",
+    label: "Puzzle / challenge mode",
+    description: "Solve tactical checkers situations in limited moves.",
+    enabled: true,
   },
 ];
 
-export const THEME_OPTIONS: ThemeOption[] = [
+export const THEME_PRESETS: ThemePreset[] = [
   {
-    id: "dark-modern",
-    name: "Dark / Modern",
-    boardClass: "from-slate-900 to-zinc-900",
-    pieceRedClass: "from-rose-500 to-rose-700",
-    pieceBlackClass: "from-slate-300 to-slate-500",
+    id: "minimal",
+    label: "Minimalist / clean",
+    description: "High contrast and minimal visual noise.",
+    palette: {
+      boardLight: "#f8fafc",
+      boardDark: "#0f172a",
+      boardBorder: "#334155",
+      redPiece: "#ef4444",
+      blackPiece: "#111827",
+      accent: "#22d3ee",
+    },
   },
   {
-    id: "playful-colorful",
-    name: "Playful / Colorful",
-    boardClass: "from-fuchsia-900 to-indigo-900",
-    pieceRedClass: "from-orange-400 to-pink-600",
-    pieceBlackClass: "from-cyan-300 to-blue-500",
+    id: "dark",
+    label: "Dark / modern",
+    description: "Deep tones with neon accents.",
+    palette: {
+      boardLight: "#374151",
+      boardDark: "#111827",
+      boardBorder: "#6b7280",
+      redPiece: "#f43f5e",
+      blackPiece: "#d1d5db",
+      accent: "#818cf8",
+    },
   },
   {
-    id: "classic-wood",
-    name: "Classic / Wooden",
-    boardClass: "from-amber-900 to-yellow-950",
-    pieceRedClass: "from-red-700 to-red-900",
-    pieceBlackClass: "from-stone-500 to-stone-700",
+    id: "playful",
+    label: "Playful / colorful",
+    description: "Vibrant board with candy-like pieces.",
+    palette: {
+      boardLight: "#fde68a",
+      boardDark: "#f97316",
+      boardBorder: "#7c2d12",
+      redPiece: "#ec4899",
+      blackPiece: "#0369a1",
+      accent: "#22c55e",
+    },
+  },
+  {
+    id: "classic",
+    label: "Classic / wooden",
+    description: "Traditional wood board aesthetics.",
+    palette: {
+      boardLight: "#d6b58a",
+      boardDark: "#7b4d2a",
+      boardBorder: "#4a2f1a",
+      redPiece: "#9f1239",
+      blackPiece: "#111827",
+      accent: "#f59e0b",
+    },
   },
 ];
 
-export const MOCK_PUZZLES: PuzzleChallenge[] = [
-  { id: "pz-1", title: "Fork Trap", goal: "Force a double capture in 2 moves.", difficulty: 2 },
-  { id: "pz-2", title: "Last Defender", goal: "Promote to king without losing material.", difficulty: 3 },
-  { id: "pz-3", title: "King Hunt", goal: "Capture the enemy king in 3 turns.", difficulty: 4 },
-  { id: "pz-4", title: "Escape Route", goal: "Avoid capture and draw the position.", difficulty: 5 },
-];
+export function createEmptyBoard(): BoardState {
+  return Array.from({ length: BOARD_SIZE }, () => Array.from({ length: BOARD_SIZE }, () => null));
+}
 
-export const DEFAULT_STATS: GameStats = {
-  totalGames: 0,
-  redWins: 0,
-  blackWins: 0,
-  draws: 0,
-  longestWinStreak: 0,
-  currentWinStreak: 0,
-  averageGameDurationSeconds: 0,
-};
+export function isInsideBoard(row: number, col: number): boolean {
+  return row >= 0 && row < BOARD_SIZE && col >= 0 && col < BOARD_SIZE;
+}
 
-export function cloneBoard(board: Board): Board {
+export function isPlayableSquare(row: number, col: number): boolean {
+  return (row + col) % 2 === 1;
+}
+
+export function cloneBoard(board: BoardState): BoardState {
   return board.map((row) => row.map((cell) => (cell ? { ...cell } : null)));
 }
 
-export function createStartingBoard(): Board {
-  const board: Board = Array.from({ length: BOARD_SIZE }, () =>
-    Array.from({ length: BOARD_SIZE }, () => null),
-  );
-
-  let blackCount = 1;
-  let redCount = 1;
+export function createInitialBoard(): BoardState {
+  const board = createEmptyBoard();
 
   for (let row = 0; row < BOARD_SIZE; row += 1) {
     for (let col = 0; col < BOARD_SIZE; col += 1) {
-      const isDarkSquare = (row + col) % 2 === 1;
-      if (!isDarkSquare) continue;
+      if (!isPlayableSquare(row, col)) continue;
 
-      if (row < 3) {
-        board[row][col] = { id: `b-${blackCount++}`, color: "black", king: false };
-      } else if (row > 4) {
-        board[row][col] = { id: `r-${redCount++}`, color: "red", king: false };
+      if (row <= 2) {
+        board[row][col] = {
+          id: `black-${row}-${col}`,
+          color: "black",
+          rank: "man",
+        };
+      } else if (row >= 5) {
+        board[row][col] = {
+          id: `red-${row}-${col}`,
+          color: "red",
+          rank: "man",
+        };
       }
     }
   }
@@ -164,267 +187,227 @@ export function createStartingBoard(): Board {
   return board;
 }
 
-export const INITIAL_BOARD = createStartingBoard();
-export const initialBoard = INITIAL_BOARD;
-
-export function isInBounds(row: number, col: number): boolean {
-  return row >= 0 && row < BOARD_SIZE && col >= 0 && col < BOARD_SIZE;
-}
-
-function movementDirections(piece: CheckerPiece): Array<{ dr: number; dc: number }> {
-  if (piece.king) {
-    return [
-      { dr: -1, dc: -1 },
-      { dr: -1, dc: 1 },
-      { dr: 1, dc: -1 },
-      { dr: 1, dc: 1 },
-    ];
+export function countPieces(board: BoardState, color?: PieceColor): number {
+  let count = 0;
+  for (const row of board) {
+    for (const cell of row) {
+      if (!cell) continue;
+      if (!color || cell.color === color) count += 1;
+    }
   }
-
-  return piece.color === "red"
-    ? [
-        { dr: -1, dc: -1 },
-        { dr: -1, dc: 1 },
-      ]
-    : [
-        { dr: 1, dc: -1 },
-        { dr: 1, dc: 1 },
-      ];
+  return count;
 }
 
-export function getSimpleMovesForPiece(board: Board, row: number, col: number): Move[] {
-  const piece = board[row]?.[col];
+function directionFor(piece: Piece): number[] {
+  if (piece.rank === "king") return [-1, 1];
+  return piece.color === "red" ? [-1] : [1];
+}
+
+export function getSimpleMoves(board: BoardState, from: Position): Move[] {
+  const piece = board[from.row]?.[from.col];
+  if (!piece) return [];
+
+  const moves: Move[] = [];
+  for (const dRow of directionFor(piece)) {
+    for (const dCol of [-1, 1]) {
+      const toRow = from.row + dRow;
+      const toCol = from.col + dCol;
+      if (!isInsideBoard(toRow, toCol)) continue;
+      if (board[toRow][toCol] !== null) continue;
+
+      moves.push({
+        from,
+        to: { row: toRow, col: toCol },
+        captures: [],
+      });
+    }
+  }
+  return moves;
+}
+
+export function getCaptureMoves(board: BoardState, from: Position): Move[] {
+  const piece = board[from.row]?.[from.col];
   if (!piece) return [];
 
   const moves: Move[] = [];
 
-  for (const { dr, dc } of movementDirections(piece)) {
-    const toRow = row + dr;
-    const toCol = col + dc;
+  for (const dRow of directionFor(piece)) {
+    for (const dCol of [-1, 1]) {
+      const midRow = from.row + dRow;
+      const midCol = from.col + dCol;
+      const toRow = from.row + dRow * 2;
+      const toCol = from.col + dCol * 2;
 
-    if (isInBounds(toRow, toCol) && board[toRow][toCol] === null) {
-      moves.push({ fromRow: row, fromCol: col, toRow, toCol });
+      if (!isInsideBoard(midRow, midCol) || !isInsideBoard(toRow, toCol)) continue;
+
+      const jumped = board[midRow][midCol];
+      if (!jumped || jumped.color === piece.color) continue;
+      if (board[toRow][toCol] !== null) continue;
+
+      moves.push({
+        from,
+        to: { row: toRow, col: toCol },
+        captures: [{ row: midRow, col: midCol }],
+      });
     }
   }
 
   return moves;
 }
 
-export function getCaptureMovesForPiece(board: Board, row: number, col: number): Move[] {
-  const piece = board[row]?.[col];
-  if (!piece) return [];
-
-  const captures: Move[] = [];
-
-  for (const { dr, dc } of movementDirections(piece)) {
-    const enemyRow = row + dr;
-    const enemyCol = col + dc;
-    const landRow = row + dr * 2;
-    const landCol = col + dc * 2;
-
-    if (!isInBounds(enemyRow, enemyCol) || !isInBounds(landRow, landCol)) continue;
-
-    const enemy = board[enemyRow][enemyCol];
-    const landing = board[landRow][landCol];
-
-    if (enemy && enemy.color !== piece.color && landing === null) {
-      captures.push({
-        fromRow: row,
-        fromCol: col,
-        toRow: landRow,
-        toCol: landCol,
-        captured: { row: enemyRow, col: enemyCol },
-      });
-    }
-  }
-
-  return captures;
-}
-
-export function getValidMovesForPiece(board: Board, row: number, col: number): Move[] {
-  const captures = getCaptureMovesForPiece(board, row, col);
-  return captures.length > 0 ? captures : getSimpleMovesForPiece(board, row, col);
-}
-
-export function getAllValidMoves(board: Board, player: PlayerColor): Move[] {
+export function getLegalMoves(board: BoardState, turn: PieceColor): Move[] {
   const captures: Move[] = [];
   const simpleMoves: Move[] = [];
 
   for (let row = 0; row < BOARD_SIZE; row += 1) {
     for (let col = 0; col < BOARD_SIZE; col += 1) {
       const piece = board[row][col];
-      if (!piece || piece.color !== player) continue;
+      if (!piece || piece.color !== turn) continue;
+      const from = { row, col };
 
-      const pieceCaptures = getCaptureMovesForPiece(board, row, col);
-      if (pieceCaptures.length > 0) {
-        captures.push(...pieceCaptures);
-      } else {
-        simpleMoves.push(...getSimpleMovesForPiece(board, row, col));
-      }
+      captures.push(...getCaptureMoves(board, from));
+      simpleMoves.push(...getSimpleMoves(board, from));
     }
   }
 
   return captures.length > 0 ? captures : simpleMoves;
 }
 
-export function applyMove(board: Board, move: Move, turn: PlayerColor): AppliedMoveResult {
-  const nextBoard = cloneBoard(board);
-  const piece = nextBoard[move.fromRow][move.fromCol];
-
-  if (!piece) {
-    throw new Error("Invalid move: source square is empty.");
-  }
-
-  nextBoard[move.fromRow][move.fromCol] = null;
-
-  if (move.captured) {
-    nextBoard[move.captured.row][move.captured.col] = null;
-  }
-
-  const promoted =
-    (piece.color === "red" && move.toRow === 0) ||
-    (piece.color === "black" && move.toRow === BOARD_SIZE - 1);
-
-  nextBoard[move.toRow][move.toCol] = { ...piece, king: piece.king || promoted };
-
-  return {
-    board: nextBoard,
-    promoted,
-    captured: Boolean(move.captured),
-    nextTurn: turn === "red" ? "black" : "red",
-  };
+export function promoteIfNeeded(piece: Piece, row: number): Piece {
+  if (piece.rank === "king") return piece;
+  if (piece.color === "red" && row === 0) return { ...piece, rank: "king" };
+  if (piece.color === "black" && row === BOARD_SIZE - 1) return { ...piece, rank: "king" };
+  return piece;
 }
 
-export function countPieces(board: Board): { red: number; black: number; redKings: number; blackKings: number } {
-  const tally = { red: 0, black: 0, redKings: 0, blackKings: 0 };
+export function applyMove(board: BoardState, move: Move): BoardState {
+  const next = cloneBoard(board);
+  const piece = next[move.from.row][move.from.col];
+  if (!piece) return next;
 
-  for (const row of board) {
-    for (const cell of row) {
-      if (!cell) continue;
-      if (cell.color === "red") {
-        tally.red += 1;
-        if (cell.king) tally.redKings += 1;
-      } else {
-        tally.black += 1;
-        if (cell.king) tally.blackKings += 1;
-      }
-    }
+  next[move.from.row][move.from.col] = null;
+  for (const cap of move.captures) {
+    next[cap.row][cap.col] = null;
   }
+  next[move.to.row][move.to.col] = promoteIfNeeded(piece, move.to.row);
 
-  return tally;
+  return next;
 }
 
-export function determineWinner(board: Board, currentTurn: PlayerColor): PlayerColor | "draw" | null {
-  const pieces = countPieces(board);
+export function evaluateWinner(board: BoardState, turn: PieceColor): PieceColor | "draw" | null {
+  const redCount = countPieces(board, "red");
+  const blackCount = countPieces(board, "black");
 
-  if (pieces.red === 0 && pieces.black === 0) return "draw";
-  if (pieces.red === 0) return "black";
-  if (pieces.black === 0) return "red";
+  if (redCount === 0) return "black";
+  if (blackCount === 0) return "red";
 
-  const moves = getAllValidMoves(board, currentTurn);
-  if (moves.length === 0) {
-    return currentTurn === "red" ? "black" : "red";
+  const legal = getLegalMoves(board, turn);
+  if (legal.length === 0) {
+    return turn === "red" ? "black" : "red";
   }
 
   return null;
 }
 
-export function createInitialGameState(
-  mode = MODE_OPTIONS[0]?.id ?? "single-ai",
-  theme = THEME_OPTIONS[0]?.id ?? "dark-modern",
-): GameState {
+export function createDefaultStats(): CheckersStats {
   return {
-    board: createStartingBoard(),
-    currentTurn: "red",
-    selected: null,
-    validMoves: [],
-    moveHistory: [],
-    redoStack: [],
-    winner: null,
-    startedAt: Date.now(),
-    elapsedSeconds: 0,
-    mode,
-    theme,
+    played: 0,
+    redWins: 0,
+    blackWins: 0,
+    draws: 0,
+    fastestWinSeconds: null,
+    longestGameSeconds: null,
   };
 }
 
-export function formatSeconds(total: number): string {
-  const safe = Number.isFinite(total) ? Math.max(0, Math.floor(total)) : 0;
-  const minutes = Math.floor(safe / 60);
-  const seconds = safe % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+export function updateStats(stats: CheckersStats, winner: PieceColor | "draw", elapsedSeconds: number): CheckersStats {
+  const safeElapsed = Number.isFinite(elapsedSeconds) ? Math.max(0, Math.floor(elapsedSeconds)) : 0;
+
+  return {
+    played: stats.played + 1,
+    redWins: winner === "red" ? stats.redWins + 1 : stats.redWins,
+    blackWins: winner === "black" ? stats.blackWins + 1 : stats.blackWins,
+    draws: winner === "draw" ? stats.draws + 1 : stats.draws,
+    fastestWinSeconds:
+      winner === "draw"
+        ? stats.fastestWinSeconds
+        : stats.fastestWinSeconds === null
+          ? safeElapsed
+          : Math.min(stats.fastestWinSeconds, safeElapsed),
+    longestGameSeconds:
+      stats.longestGameSeconds === null
+        ? safeElapsed
+        : Math.max(stats.longestGameSeconds, safeElapsed),
+  };
 }
 
-export function getRandomHint(board: Board, player: PlayerColor): Move | null {
-  const moves = getAllValidMoves(board, player);
-  if (moves.length === 0) return null;
-
-  const captureMoves = moves.filter((m) => Boolean(m.captured));
-  const source = captureMoves.length > 0 ? captureMoves : moves;
-  return source[Math.floor(Math.random() * source.length)] ?? null;
+export function formatDuration(totalSeconds: number): string {
+  const clamped = Math.max(0, Math.floor(totalSeconds));
+  const mins = Math.floor(clamped / 60)
+    .toString()
+    .padStart(2, "0");
+  const secs = (clamped % 60).toString().padStart(2, "0");
+  return `${mins}:${secs}`;
 }
 
-export function saveGameState(state: GameState): boolean {
-  if (typeof window === "undefined") return false;
-
+export function safeParseJson<T>(raw: string | null, fallback: T): T {
+  if (!raw) return fallback;
   try {
-    const payload = JSON.stringify(state);
-    window.localStorage.setItem(STORAGE_KEY, payload);
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+export function saveToStorage<T>(key: string, value: T): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
     return true;
   } catch {
     return false;
   }
 }
 
-export function loadGameState(): GameState | null {
-  if (typeof window === "undefined") return null;
-
+export function loadFromStorage<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-
-    const parsed = JSON.parse(raw) as Partial<GameState>;
-    if (!parsed || !Array.isArray(parsed.board) || !parsed.currentTurn) return null;
-
-    const fallback = createInitialGameState(
-      typeof parsed.mode === "string" ? parsed.mode : undefined,
-      typeof parsed.theme === "string" ? parsed.theme : undefined,
-    );
-
-    return {
-      ...fallback,
-      ...parsed,
-      board: parsed.board as Board,
-      currentTurn: parsed.currentTurn as PlayerColor,
-      moveHistory: Array.isArray(parsed.moveHistory) ? parsed.moveHistory : [],
-      redoStack: Array.isArray(parsed.redoStack) ? parsed.redoStack : [],
-      validMoves: Array.isArray(parsed.validMoves) ? parsed.validMoves : [],
-      selected: parsed.selected ?? null,
-      winner: parsed.winner ?? null,
-      startedAt: typeof parsed.startedAt === "number" ? parsed.startedAt : Date.now(),
-      elapsedSeconds: typeof parsed.elapsedSeconds === "number" ? parsed.elapsedSeconds : 0,
-    };
+    const raw = window.localStorage.getItem(key);
+    return safeParseJson(raw, fallback);
   } catch {
-    return null;
+    return fallback;
   }
 }
 
-export function clearSavedGameState(): boolean {
-  if (typeof window === "undefined") return false;
+export function createMockPuzzles(): PuzzleDefinition[] {
+  const puzzleOne = createEmptyBoard();
+  puzzleOne[5][0] = { id: "red-5-0", color: "red", rank: "man" };
+  puzzleOne[4][1] = { id: "black-4-1", color: "black", rank: "man" };
+  puzzleOne[2][3] = { id: "black-2-3", color: "black", rank: "man" };
+  puzzleOne[6][3] = { id: "red-6-3", color: "red", rank: "king" };
 
-  try {
-    window.localStorage.removeItem(STORAGE_KEY);
-    return true;
-  } catch {
-    return false;
-  }
+  const puzzleTwo = createEmptyBoard();
+  puzzleTwo[1][2] = { id: "black-1-2", color: "black", rank: "king" };
+  puzzleTwo[2][1] = { id: "red-2-1", color: "red", rank: "man" };
+  puzzleTwo[4][3] = { id: "red-4-3", color: "red", rank: "man" };
+  puzzleTwo[6][5] = { id: "red-6-5", color: "red", rank: "king" };
+
+  return [
+    {
+      id: "puzzle-fork-1",
+      title: "Double Jump Fork",
+      objective: "Red to move: force a winning capture sequence in 2 moves.",
+      difficulty: 3,
+      turn: "red",
+      board: puzzleOne,
+    },
+    {
+      id: "puzzle-trap-2",
+      title: "King Trap",
+      objective: "Black to move: trap the red king without losing material.",
+      difficulty: 4,
+      turn: "black",
+      board: puzzleTwo,
+    },
+  ];
 }
-
-export const mockData = {
-  modeOptions: MODE_OPTIONS,
-  themeOptions: THEME_OPTIONS,
-  puzzles: MOCK_PUZZLES,
-  defaultStats: DEFAULT_STATS,
-};
-
-export default mockData;
