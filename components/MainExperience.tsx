@@ -1,253 +1,235 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type Player = "red" | "black";
-type GameMode = "single" | "local" | "online" | "puzzle";
-type ThemeName = "minimal" | "dark" | "playful" | "classic";
-type GameStatus = "playing" | "finished";
+type GameMode = "local" | "ai" | "online" | "puzzle";
+type ThemeName = "minimal" | "dark" | "playful" | "classic" | "custom";
+type OnlineStatus = "idle" | "matching" | "connected" | "reconnecting";
 
-interface Piece {
-  id: number;
+type Piece = {
   player: Player;
   king: boolean;
-}
+};
 
 type Cell = Piece | null;
 type Board = Cell[][];
 
-interface Position {
+type Position = {
   row: number;
   col: number;
-}
+};
 
-interface Move {
+type Move = {
   from: Position;
   to: Position;
-  captured?: Position;
-}
+  captures: Position[];
+};
 
-interface Timers {
-  red: number;
-  black: number;
-}
-
-interface Snapshot {
+type Snapshot = {
   board: Board;
   currentPlayer: Player;
-  selected: Position | null;
   forcedFrom: Position | null;
-  timers: Timers;
-  moveLog: string[];
-  winner: Player | null;
-  gameStatus: GameStatus;
-  puzzleTurns: number;
-  resultRecorded: boolean;
-}
+  winner: Player | "draw" | null;
+  moveCount: number;
+  timers: { red: number; black: number };
+  mode: GameMode;
+  puzzleIndex: number;
+  puzzleMovesLeft: number;
+};
 
-interface Stats {
+type Stats = {
   gamesPlayed: number;
   redWins: number;
   blackWins: number;
   draws: number;
-  puzzleSolved: number;
-}
+  completedByMode: Record<GameMode, number>;
+};
 
-interface ThemeConfig {
-  page: string;
-  card: string;
+type ThemePalette = {
+  appBg: string;
+  appText: string;
   boardLight: string;
   boardDark: string;
-  text: string;
+  panel: string;
+  panelBorder: string;
+  redPiece: string;
+  blackPiece: string;
   accent: string;
-  pieceRed: string;
-  pieceBlack: string;
-}
+};
 
-interface PuzzleSetup {
+type PuzzleDef = {
+  id: string;
   name: string;
   description: string;
-  maxRedTurns: number;
+  startingPlayer: Player;
+  moveLimit: number;
   board: Board;
-  currentPlayer: Player;
-}
+};
 
 const BOARD_SIZE = 8;
-const SAVE_KEY = "fun-checkers-save-v1";
-const STATS_KEY = "fun-checkers-stats-v1";
-const START_TIME = 5 * 60;
+const START_TIME_SECONDS = 5 * 60;
+const STATS_KEY = "checkers.fun.stats.v1";
+const SAVE_KEY = "checkers.fun.save.v1";
 
-const THEMES: Record<ThemeName, ThemeConfig> = {
-  minimal: {
-    page: "bg-slate-50",
-    card: "bg-white border border-slate-200",
-    boardLight: "bg-slate-100",
-    boardDark: "bg-slate-400",
-    text: "text-slate-900",
-    accent: "text-indigo-600",
-    pieceRed: "from-rose-400 to-rose-600",
-    pieceBlack: "from-slate-600 to-slate-800",
-  },
-  dark: {
-    page: "bg-slate-950",
-    card: "bg-slate-900 border border-slate-800",
-    boardLight: "bg-slate-700",
-    boardDark: "bg-slate-900",
-    text: "text-slate-100",
-    accent: "text-cyan-400",
-    pieceRed: "from-red-500 to-rose-700",
-    pieceBlack: "from-zinc-300 to-zinc-500",
-  },
-  playful: {
-    page: "bg-gradient-to-br from-violet-50 via-pink-50 to-cyan-50",
-    card: "bg-white/90 border border-violet-200",
-    boardLight: "bg-yellow-100",
-    boardDark: "bg-fuchsia-300",
-    text: "text-violet-950",
-    accent: "text-fuchsia-600",
-    pieceRed: "from-orange-400 to-pink-500",
-    pieceBlack: "from-indigo-500 to-violet-700",
-  },
-  classic: {
-    page: "bg-amber-100",
-    card: "bg-amber-50 border border-amber-300",
-    boardLight: "bg-amber-200",
-    boardDark: "bg-amber-700",
-    text: "text-amber-950",
-    accent: "text-emerald-700",
-    pieceRed: "from-red-700 to-red-900",
-    pieceBlack: "from-stone-700 to-stone-900",
-  },
-};
-
-const MODE_LABELS: Record<GameMode, string> = {
-  single: "Single vs AI",
-  local: "Local 2P",
-  online: "Online",
-  puzzle: "Puzzle",
-};
-
-const DEFAULT_STATS: Stats = {
+const defaultStats: Stats = {
   gamesPlayed: 0,
   redWins: 0,
   blackWins: 0,
   draws: 0,
-  puzzleSolved: 0,
+  completedByMode: {
+    local: 0,
+    ai: 0,
+    online: 0,
+    puzzle: 0,
+  },
 };
+
+const THEMES: Record<Exclude<ThemeName, "custom">, ThemePalette> = {
+  minimal: {
+    appBg: "#f5f7fb",
+    appText: "#111827",
+    boardLight: "#e5e7eb",
+    boardDark: "#9ca3af",
+    panel: "#ffffff",
+    panelBorder: "#d1d5db",
+    redPiece: "#ef4444",
+    blackPiece: "#111827",
+    accent: "#2563eb",
+  },
+  dark: {
+    appBg: "#080b16",
+    appText: "#e5e7eb",
+    boardLight: "#1f2937",
+    boardDark: "#0f172a",
+    panel: "#0b1225",
+    panelBorder: "#243043",
+    redPiece: "#fb7185",
+    blackPiece: "#d1d5db",
+    accent: "#38bdf8",
+  },
+  playful: {
+    appBg: "#0f172a",
+    appText: "#f8fafc",
+    boardLight: "#60a5fa",
+    boardDark: "#7c3aed",
+    panel: "#1e1b4b",
+    panelBorder: "#8b5cf6",
+    redPiece: "#f97316",
+    blackPiece: "#34d399",
+    accent: "#facc15",
+  },
+  classic: {
+    appBg: "#2d1f10",
+    appText: "#fff8e6",
+    boardLight: "#d6b48a",
+    boardDark: "#8b5e34",
+    panel: "#3b2a18",
+    panelBorder: "#6f4d2e",
+    redPiece: "#b91c1c",
+    blackPiece: "#111111",
+    accent: "#f59e0b",
+  },
+};
+
+const parseBoard = (rows: string[]): Board =>
+  rows.map((row, rowIndex) =>
+    row.split("").map((char, colIndex) => {
+      if (!isDarkSquare(rowIndex, colIndex)) return null;
+      if (char === "r") return { player: "red", king: false };
+      if (char === "R") return { player: "red", king: true };
+      if (char === "b") return { player: "black", king: false };
+      if (char === "B") return { player: "black", king: true };
+      return null;
+    })
+  );
+
+const PUZZLES: PuzzleDef[] = [
+  {
+    id: "fork-1",
+    name: "Fork Finish",
+    description: "Red to move. Force a double capture and finish within 2 turns.",
+    startingPlayer: "red",
+    moveLimit: 2,
+    board: parseBoard([
+      "........",
+      "....b...",
+      "...b....",
+      "..r.....",
+      "........",
+      ".....r..",
+      "........",
+      "........",
+    ]),
+  },
+  {
+    id: "king-hunt",
+    name: "King Hunt",
+    description: "Convert to a king and clear black in 3 moves.",
+    startingPlayer: "red",
+    moveLimit: 3,
+    board: parseBoard([
+      "........",
+      "......b.",
+      "........",
+      "....b...",
+      "...r....",
+      "........",
+      "........",
+      "........",
+    ]),
+  },
+  {
+    id: "endgame-net",
+    name: "Endgame Net",
+    description: "Trap black with precise movement in 4 turns.",
+    startingPlayer: "red",
+    moveLimit: 4,
+    board: parseBoard([
+      "........",
+      "..b.....",
+      "........",
+      "....r...",
+      "........",
+      "......r.",
+      "........",
+      "........",
+    ]),
+  },
+];
+
+function isDarkSquare(row: number, col: number) {
+  return (row + col) % 2 === 1;
+}
 
 function inBounds(row: number, col: number) {
   return row >= 0 && row < BOARD_SIZE && col >= 0 && col < BOARD_SIZE;
 }
 
 function cloneBoard(board: Board): Board {
-  return board.map((r) => r.map((c) => (c ? { ...c } : null)));
+  return board.map((row) => row.map((cell) => (cell ? { ...cell } : null)));
 }
 
-function buildStandardBoard(): Board {
-  const board: Board = Array.from({ length: BOARD_SIZE }, () =>
-    Array.from({ length: BOARD_SIZE }, () => null),
-  );
-  let id = 1;
+function createInitialBoard(): Board {
+  const board: Board = Array.from({ length: BOARD_SIZE }, () => Array<Cell>(BOARD_SIZE).fill(null));
 
   for (let row = 0; row < 3; row += 1) {
     for (let col = 0; col < BOARD_SIZE; col += 1) {
-      if ((row + col) % 2 === 1) {
-        board[row][col] = { id: id += 1, player: "black", king: false };
+      if (isDarkSquare(row, col)) {
+        board[row][col] = { player: "black", king: false };
       }
     }
   }
 
   for (let row = 5; row < BOARD_SIZE; row += 1) {
     for (let col = 0; col < BOARD_SIZE; col += 1) {
-      if ((row + col) % 2 === 1) {
-        board[row][col] = { id: id += 1, player: "red", king: false };
+      if (isDarkSquare(row, col)) {
+        board[row][col] = { player: "red", king: false };
       }
     }
   }
 
   return board;
-}
-
-function makePuzzleBoard(placements: Array<{ row: number; col: number; player: Player; king?: boolean }>): Board {
-  const board: Board = Array.from({ length: BOARD_SIZE }, () =>
-    Array.from({ length: BOARD_SIZE }, () => null),
-  );
-  let id = 1000;
-  placements.forEach((p) => {
-    board[p.row][p.col] = {
-      id: id += 1,
-      player: p.player,
-      king: Boolean(p.king),
-    };
-  });
-  return board;
-}
-
-function getPuzzle(index: number): PuzzleSetup {
-  const puzzles: PuzzleSetup[] = [
-    {
-      name: "Puzzle 1: Opening Trap",
-      description: "Red to move. Win by forcing captures in 2 red turns.",
-      maxRedTurns: 2,
-      currentPlayer: "red",
-      board: makePuzzleBoard([
-        { row: 5, col: 0, player: "red" },
-        { row: 5, col: 2, player: "red" },
-        { row: 4, col: 3, player: "black" },
-        { row: 2, col: 5, player: "black" },
-      ]),
-    },
-    {
-      name: "Puzzle 2: King Me",
-      description: "Promote quickly and convert the advantage in 3 red turns.",
-      maxRedTurns: 3,
-      currentPlayer: "red",
-      board: makePuzzleBoard([
-        { row: 2, col: 1, player: "red" },
-        { row: 6, col: 5, player: "red" },
-        { row: 1, col: 2, player: "black" },
-        { row: 3, col: 4, player: "black" },
-      ]),
-    },
-    {
-      name: "Puzzle 3: Double Jump",
-      description: "Spot the chain capture and clear the board in 2 turns.",
-      maxRedTurns: 2,
-      currentPlayer: "red",
-      board: makePuzzleBoard([
-        { row: 5, col: 4, player: "red" },
-        { row: 4, col: 3, player: "black" },
-        { row: 2, col: 1, player: "black" },
-        { row: 6, col: 1, player: "red" },
-      ]),
-    },
-    {
-      name: "Puzzle 4: Endgame Sprint",
-      description: "Win in 3 turns against a king threat.",
-      maxRedTurns: 3,
-      currentPlayer: "red",
-      board: makePuzzleBoard([
-        { row: 7, col: 2, player: "red", king: true },
-        { row: 5, col: 6, player: "red" },
-        { row: 2, col: 5, player: "black", king: true },
-        { row: 4, col: 1, player: "black" },
-      ]),
-    },
-    {
-      name: "Puzzle 5: Precision Win",
-      description: "Only one best line. Beat black in 2 red turns.",
-      maxRedTurns: 2,
-      currentPlayer: "red",
-      board: makePuzzleBoard([
-        { row: 5, col: 6, player: "red" },
-        { row: 3, col: 4, player: "black" },
-        { row: 1, col: 2, player: "black" },
-        { row: 7, col: 0, player: "red" },
-      ]),
-    },
-  ];
-
-  return puzzles[index] ?? puzzles[0];
 }
 
 function getDirections(piece: Piece): Array<[number, number]> {
@@ -259,740 +241,830 @@ function getDirections(piece: Piece): Array<[number, number]> {
       [1, 1],
     ];
   }
-  return piece.player === "red"
-    ? [
-        [-1, -1],
-        [-1, 1],
-      ]
-    : [
-        [1, -1],
-        [1, 1],
-      ];
+  const forward = piece.player === "red" ? -1 : 1;
+  return [
+    [forward, -1],
+    [forward, 1],
+  ];
 }
 
-function getMovesForPiece(board: Board, row: number, col: number, piece: Piece): Move[] {
+function getCaptureMovesForPiece(board: Board, row: number, col: number, piece: Piece): Move[] {
   const moves: Move[] = [];
+
   for (const [dr, dc] of getDirections(piece)) {
-    const stepR = row + dr;
-    const stepC = col + dc;
-    if (!inBounds(stepR, stepC)) continue;
+    const midRow = row + dr;
+    const midCol = col + dc;
+    const landRow = row + dr * 2;
+    const landCol = col + dc * 2;
 
-    if (!board[stepR][stepC]) {
-      moves.push({ from: { row, col }, to: { row: stepR, col: stepC } });
-      continue;
-    }
+    if (!inBounds(midRow, midCol) || !inBounds(landRow, landCol)) continue;
 
-    const jumped = board[stepR][stepC];
-    if (jumped && jumped.player !== piece.player) {
-      const landR = stepR + dr;
-      const landC = stepC + dc;
-      if (inBounds(landR, landC) && !board[landR][landC]) {
-        moves.push({
-          from: { row, col },
-          to: { row: landR, col: landC },
-          captured: { row: stepR, col: stepC },
-        });
-      }
+    const middle = board[midRow][midCol];
+    const landing = board[landRow][landCol];
+
+    if (middle && middle.player !== piece.player && !landing) {
+      moves.push({
+        from: { row, col },
+        to: { row: landRow, col: landCol },
+        captures: [{ row: midRow, col: midCol }],
+      });
     }
   }
+
   return moves;
 }
 
-function getAllLegalMoves(board: Board, player: Player, forcedFrom: Position | null): Move[] {
-  const allMoves: Move[] = [];
+function getSimpleMovesForPiece(board: Board, row: number, col: number, piece: Piece): Move[] {
+  const moves: Move[] = [];
+
+  for (const [dr, dc] of getDirections(piece)) {
+    const toRow = row + dr;
+    const toCol = col + dc;
+    if (!inBounds(toRow, toCol)) continue;
+    if (board[toRow][toCol]) continue;
+
+    moves.push({
+      from: { row, col },
+      to: { row: toRow, col: toCol },
+      captures: [],
+    });
+  }
+
+  return moves;
+}
+
+function getLegalMoves(board: Board, player: Player, forcedFrom: Position | null): Move[] {
+  if (forcedFrom) {
+    const forcedPiece = board[forcedFrom.row][forcedFrom.col];
+    if (!forcedPiece || forcedPiece.player !== player) return [];
+    return getCaptureMovesForPiece(board, forcedFrom.row, forcedFrom.col, forcedPiece);
+  }
+
+  const captures: Move[] = [];
+  const simple: Move[] = [];
 
   for (let row = 0; row < BOARD_SIZE; row += 1) {
     for (let col = 0; col < BOARD_SIZE; col += 1) {
       const piece = board[row][col];
       if (!piece || piece.player !== player) continue;
-      if (forcedFrom && (forcedFrom.row !== row || forcedFrom.col !== col)) continue;
-      allMoves.push(...getMovesForPiece(board, row, col, piece));
+
+      const pieceCaptures = getCaptureMovesForPiece(board, row, col, piece);
+      if (pieceCaptures.length > 0) {
+        captures.push(...pieceCaptures);
+      } else {
+        simple.push(...getSimpleMovesForPiece(board, row, col, piece));
+      }
     }
   }
 
-  const captures = allMoves.filter((m) => Boolean(m.captured));
-  return captures.length > 0 ? captures : allMoves;
+  return captures.length > 0 ? captures : simple;
 }
 
-function coord(pos: Position): string {
-  const file = String.fromCharCode(97 + pos.col);
-  const rank = (8 - pos.row).toString();
-  return `${file}${rank}`;
+function applyMove(board: Board, move: Move): { board: Board; promoted: boolean } {
+  const next = cloneBoard(board);
+  const movingPiece = next[move.from.row][move.from.col];
+
+  if (!movingPiece) {
+    return { board: next, promoted: false };
+  }
+
+  next[move.from.row][move.from.col] = null;
+  for (const capture of move.captures) {
+    next[capture.row][capture.col] = null;
+  }
+
+  const shouldPromote =
+    !movingPiece.king &&
+    ((movingPiece.player === "red" && move.to.row === 0) ||
+      (movingPiece.player === "black" && move.to.row === BOARD_SIZE - 1));
+
+  next[move.to.row][move.to.col] = {
+    player: movingPiece.player,
+    king: movingPiece.king || shouldPromote,
+  };
+
+  return { board: next, promoted: shouldPromote };
 }
 
-function formatTime(totalSeconds: number): string {
-  const clamped = Math.max(totalSeconds, 0);
-  const minutes = Math.floor(clamped / 60)
+function countPieces(board: Board, player: Player): number {
+  let count = 0;
+  for (const row of board) {
+    for (const cell of row) {
+      if (cell?.player === player) count += 1;
+    }
+  }
+  return count;
+}
+
+function evaluateWinner(board: Board, playerToMove: Player, forcedFrom: Position | null): Player | null {
+  if (countPieces(board, "red") === 0) return "black";
+  if (countPieces(board, "black") === 0) return "red";
+
+  const moves = getLegalMoves(board, playerToMove, forcedFrom);
+  if (moves.length === 0) return playerToMove === "red" ? "black" : "red";
+
+  return null;
+}
+
+function samePos(a: Position, b: Position) {
+  return a.row === b.row && a.col === b.col;
+}
+
+function formatTime(value: number): string {
+  const clamped = Math.max(0, value);
+  const min = Math.floor(clamped / 60)
     .toString()
     .padStart(2, "0");
-  const seconds = Math.floor(clamped % 60)
+  const sec = Math.floor(clamped % 60)
     .toString()
     .padStart(2, "0");
-  return `${minutes}:${seconds}`;
+  return `${min}:${sec}`;
 }
 
-function pickHintMove(moves: Move[]): Move | null {
+function getHintMove(moves: Move[], board: Board, player: Player): Move | null {
   if (moves.length === 0) return null;
-  const captures = moves.filter((m) => m.captured);
-  const prioritized = captures.length > 0 ? captures : moves;
 
-  const kinging = prioritized.find((m) => m.to.row === 0 || m.to.row === 7);
-  if (kinging) return kinging;
+  const scored = moves.map((move) => {
+    const piece = board[move.from.row][move.from.col];
+    const captureScore = move.captures.length * 10;
+    const promotionScore =
+      piece && !piece.king && ((player === "red" && move.to.row === 0) || (player === "black" && move.to.row === 7))
+        ? 8
+        : 0;
+    const centerScore = 3 - Math.abs(3.5 - move.to.col);
+    return { move, score: captureScore + promotionScore + centerScore };
+  });
 
-  return prioritized[0];
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0]?.move ?? null;
 }
 
-function countPieces(board: Board) {
-  let red = 0;
-  let black = 0;
-  for (let r = 0; r < BOARD_SIZE; r += 1) {
-    for (let c = 0; c < BOARD_SIZE; c += 1) {
-      const p = board[r][c];
-      if (!p) continue;
-      if (p.player === "red") red += 1;
-      else black += 1;
-    }
-  }
-  return { red, black };
+function capitalize(player: Player) {
+  return player.charAt(0).toUpperCase() + player.slice(1);
 }
 
 export default function MainExperience() {
-  const [mode, setMode] = useState<GameMode>("single");
+  const [mode, setMode] = useState<GameMode>("local");
   const [theme, setTheme] = useState<ThemeName>("dark");
-  const [board, setBoard] = useState<Board>(() => buildStandardBoard());
+  const [customTheme, setCustomTheme] = useState<ThemePalette>({
+    appBg: "#09111f",
+    appText: "#e5e7eb",
+    boardLight: "#dbeafe",
+    boardDark: "#3b82f6",
+    panel: "#111827",
+    panelBorder: "#1f2937",
+    redPiece: "#f43f5e",
+    blackPiece: "#111827",
+    accent: "#22d3ee",
+  });
+
+  const [board, setBoard] = useState<Board>(createInitialBoard());
   const [currentPlayer, setCurrentPlayer] = useState<Player>("red");
   const [selected, setSelected] = useState<Position | null>(null);
   const [forcedFrom, setForcedFrom] = useState<Position | null>(null);
-  const [timers, setTimers] = useState<Timers>({ red: START_TIME, black: START_TIME });
-  const [timerEnabled, setTimerEnabled] = useState(true);
-  const [moveLog, setMoveLog] = useState<string[]>([]);
+  const [winner, setWinner] = useState<Player | "draw" | null>(null);
+  const [message, setMessage] = useState("Red starts. Capture is mandatory!");
+  const [moveCount, setMoveCount] = useState(0);
+
   const [history, setHistory] = useState<Snapshot[]>([]);
   const [future, setFuture] = useState<Snapshot[]>([]);
-  const [winner, setWinner] = useState<Player | null>(null);
-  const [gameStatus, setGameStatus] = useState<GameStatus>("playing");
-  const [statusMessage, setStatusMessage] = useState("Select a red checker to start.");
-  const [stats, setStats] = useState<Stats>(DEFAULT_STATS);
-  const [isThinking, setIsThinking] = useState(false);
+
+  const [timers, setTimers] = useState({ red: START_TIME_SECONDS, black: START_TIME_SECONDS });
+  const [paused, setPaused] = useState(false);
+
+  const [hintsOn, setHintsOn] = useState(true);
   const [hintMove, setHintMove] = useState<Move | null>(null);
-  const [activePuzzle, setActivePuzzle] = useState(0);
-  const [puzzleTurns, setPuzzleTurns] = useState(0);
-  const [maxPuzzleTurns, setMaxPuzzleTurns] = useState(2);
-  const [puzzleDescription, setPuzzleDescription] = useState<string>("");
-  const [resultRecorded, setResultRecorded] = useState(false);
+  const [showCoords, setShowCoords] = useState(false);
 
-  const themeConfig = THEMES[theme];
+  const [stats, setStats] = useState<Stats>(defaultStats);
 
-  const legalMoves = useMemo(
-    () => getAllLegalMoves(board, currentPlayer, forcedFrom),
-    [board, currentPlayer, forcedFrom],
-  );
+  const [aiThinking, setAiThinking] = useState(false);
+  const [onlineStatus, setOnlineStatus] = useState<OnlineStatus>("idle");
+  const [remoteThinking, setRemoteThinking] = useState(false);
+
+  const [puzzleIndex, setPuzzleIndex] = useState(0);
+  const [puzzleMovesLeft, setPuzzleMovesLeft] = useState(0);
+
+  const palette = useMemo<ThemePalette>(() => {
+    if (theme === "custom") return customTheme;
+    return THEMES[theme];
+  }, [theme, customTheme]);
+
+  const legalMoves = useMemo(() => getLegalMoves(board, currentPlayer, forcedFrom), [board, currentPlayer, forcedFrom]);
 
   const selectedMoves = useMemo(() => {
     if (!selected) return [] as Move[];
-    return legalMoves.filter(
-      (m) => m.from.row === selected.row && m.from.col === selected.col,
-    );
+    return legalMoves.filter((move) => samePos(move.from, selected));
   }, [legalMoves, selected]);
 
-  const aiTurn =
-    gameStatus === "playing" &&
-    (mode === "single" || mode === "puzzle") &&
-    currentPlayer === "black";
+  const playerCanInteract = useMemo(() => {
+    if (winner || paused) return false;
+    if (mode === "ai" && currentPlayer === "black") return false;
+    if (mode === "online") {
+      if (onlineStatus !== "connected") return false;
+      if (currentPlayer === "black") return false;
+    }
+    return true;
+  }, [winner, paused, mode, currentPlayer, onlineStatus]);
 
-  const snapshotCurrent = (): Snapshot => ({
-    board: cloneBoard(board),
-    currentPlayer,
-    selected,
-    forcedFrom,
-    timers: { ...timers },
-    moveLog: [...moveLog],
-    winner,
-    gameStatus,
-    puzzleTurns,
-    resultRecorded,
-  });
+  const registerResult = useCallback(
+    (result: Player | "draw") => {
+      setStats((prev) => ({
+        gamesPlayed: prev.gamesPlayed + 1,
+        redWins: prev.redWins + (result === "red" ? 1 : 0),
+        blackWins: prev.blackWins + (result === "black" ? 1 : 0),
+        draws: prev.draws + (result === "draw" ? 1 : 0),
+        completedByMode: {
+          ...prev.completedByMode,
+          [mode]: prev.completedByMode[mode] + 1,
+        },
+      }));
+    },
+    [mode]
+  );
 
-  const applySnapshot = (snap: Snapshot) => {
+  const makeSnapshot = useCallback((): Snapshot => {
+    return {
+      board: cloneBoard(board),
+      currentPlayer,
+      forcedFrom: forcedFrom ? { ...forcedFrom } : null,
+      winner,
+      moveCount,
+      timers: { ...timers },
+      mode,
+      puzzleIndex,
+      puzzleMovesLeft,
+    };
+  }, [board, currentPlayer, forcedFrom, winner, moveCount, timers, mode, puzzleIndex, puzzleMovesLeft]);
+
+  const restoreSnapshot = useCallback((snap: Snapshot) => {
     setBoard(cloneBoard(snap.board));
     setCurrentPlayer(snap.currentPlayer);
-    setSelected(snap.selected);
-    setForcedFrom(snap.forcedFrom);
-    setTimers({ ...snap.timers });
-    setMoveLog([...snap.moveLog]);
+    setForcedFrom(snap.forcedFrom ? { ...snap.forcedFrom } : null);
     setWinner(snap.winner);
-    setGameStatus(snap.gameStatus);
-    setPuzzleTurns(snap.puzzleTurns);
-    setResultRecorded(snap.resultRecorded);
-    setHintMove(null);
-    setIsThinking(false);
-  };
-
-  const newGame = (nextMode: GameMode = mode, puzzleIdx = activePuzzle) => {
-    if (nextMode === "puzzle") {
-      const puzzle = getPuzzle(puzzleIdx);
-      setBoard(cloneBoard(puzzle.board));
-      setCurrentPlayer(puzzle.currentPlayer);
-      setPuzzleTurns(0);
-      setMaxPuzzleTurns(puzzle.maxRedTurns);
-      setPuzzleDescription(`${puzzle.name} — ${puzzle.description}`);
-      setStatusMessage("Puzzle loaded. You are red. Find the winning line.");
-    } else {
-      setBoard(buildStandardBoard());
-      setCurrentPlayer("red");
-      setPuzzleTurns(0);
-      setMaxPuzzleTurns(2);
-      setPuzzleDescription("");
-      setStatusMessage(
-        nextMode === "online"
-          ? "Online mode UI is ready; live matchmaking is not connected yet."
-          : "Fresh game started. Red moves first.",
-      );
-    }
-
+    setMoveCount(snap.moveCount);
+    setTimers({ ...snap.timers });
+    setMode(snap.mode);
+    setPuzzleIndex(snap.puzzleIndex);
+    setPuzzleMovesLeft(snap.puzzleMovesLeft);
     setSelected(null);
-    setForcedFrom(null);
-    setTimers({ red: START_TIME, black: START_TIME });
-    setMoveLog([]);
-    setHistory([]);
-    setFuture([]);
-    setWinner(null);
-    setGameStatus("playing");
     setHintMove(null);
-    setIsThinking(false);
-    setResultRecorded(false);
-  };
+    setMessage("Game state restored.");
+  }, []);
+
+  const startNewGame = useCallback(
+    (nextMode: GameMode = mode) => {
+      setHistory([]);
+      setFuture([]);
+      setWinner(null);
+      setSelected(null);
+      setForcedFrom(null);
+      setMoveCount(0);
+      setHintMove(null);
+      setPaused(false);
+      setTimers({ red: START_TIME_SECONDS, black: START_TIME_SECONDS });
+      setAiThinking(false);
+      setRemoteThinking(false);
+
+      if (nextMode === "puzzle") {
+        const puzzle = PUZZLES[puzzleIndex];
+        setBoard(cloneBoard(puzzle.board));
+        setCurrentPlayer(puzzle.startingPlayer);
+        setPuzzleMovesLeft(puzzle.moveLimit);
+        setMessage(`${puzzle.name}: ${puzzle.description}`);
+      } else {
+        setBoard(createInitialBoard());
+        setCurrentPlayer("red");
+        setPuzzleMovesLeft(0);
+        if (nextMode === "local") setMessage("Local multiplayer: pass device each turn.");
+        if (nextMode === "ai") setMessage("Single-player: you are Red, AI is Black.");
+        if (nextMode === "online") setMessage("Matchmaking started...");
+      }
+
+      if (nextMode === "online") {
+        setOnlineStatus("matching");
+        window.setTimeout(() => {
+          setOnlineStatus("connected");
+          setMessage("Connected! You are Red. Opponent is synced.");
+        }, 1100);
+      } else {
+        setOnlineStatus("idle");
+      }
+    },
+    [mode, puzzleIndex]
+  );
+
+  const executeMove = useCallback(
+    (move: Move) => {
+      const snapshot = makeSnapshot();
+      setHistory((prev) => [...prev, snapshot]);
+      setFuture([]);
+
+      const result = applyMove(board, move);
+      let nextPlayer: Player = currentPlayer;
+      let nextForcedFrom: Position | null = null;
+      let chainCapture = false;
+
+      const movedPiece = result.board[move.to.row][move.to.col];
+      if (move.captures.length > 0 && movedPiece && !result.promoted) {
+        const followUps = getCaptureMovesForPiece(result.board, move.to.row, move.to.col, movedPiece);
+        if (followUps.length > 0) {
+          chainCapture = true;
+          nextForcedFrom = { ...move.to };
+          setMessage("Combo move! Continue with the same piece.");
+        }
+      }
+
+      if (!chainCapture) {
+        nextPlayer = currentPlayer === "red" ? "black" : "red";
+      }
+
+      setBoard(result.board);
+      setForcedFrom(nextForcedFrom);
+      setCurrentPlayer(nextPlayer);
+      setSelected(chainCapture ? { ...move.to } : null);
+      setMoveCount((prev) => prev + 1);
+
+      const gameWinner = evaluateWinner(result.board, nextPlayer, nextForcedFrom);
+
+      if (mode === "puzzle") {
+        const nextRemaining = Math.max(0, puzzleMovesLeft - 1);
+        setPuzzleMovesLeft(nextRemaining);
+
+        if (gameWinner === "red") {
+          setWinner("red");
+          setMessage("Puzzle solved! Brilliant finish.");
+          registerResult("red");
+          return;
+        }
+
+        if (nextRemaining === 0 && !gameWinner) {
+          setWinner("black");
+          setMessage("Puzzle failed: move limit reached.");
+          registerResult("black");
+          return;
+        }
+      }
+
+      if (gameWinner) {
+        setWinner(gameWinner);
+        setMessage(`${capitalize(gameWinner)} wins!`);
+        registerResult(gameWinner);
+      } else if (!chainCapture) {
+        setMessage(`${capitalize(nextPlayer)} to move.`);
+      }
+    },
+    [board, currentPlayer, makeSnapshot, mode, puzzleMovesLeft, registerResult]
+  );
 
   useEffect(() => {
-    const rawStats = localStorage.getItem(STATS_KEY);
-    if (rawStats) {
-      try {
-        const parsed = JSON.parse(rawStats) as Stats;
-        setStats({ ...DEFAULT_STATS, ...parsed });
-      } catch {
-        setStats(DEFAULT_STATS);
-      }
+    if (!hintsOn || winner) {
+      setHintMove(null);
+      return;
     }
+    setHintMove(getHintMove(legalMoves, board, currentPlayer));
+  }, [hintsOn, legalMoves, board, currentPlayer, winner]);
 
-    if (mode === "puzzle") {
-      newGame("puzzle", 0);
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(STATS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Stats;
+        setStats(parsed);
+      }
+    } catch {
+      // Ignore invalid persisted values
     }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem(STATS_KEY, JSON.stringify(stats));
+    try {
+      window.localStorage.setItem(STATS_KEY, JSON.stringify(stats));
+    } catch {
+      // Ignore write failures
+    }
   }, [stats]);
 
   useEffect(() => {
-    if (gameStatus !== "playing") return;
-    if (!timerEnabled) return;
+    if (paused || winner) return;
+    if (mode === "online" && onlineStatus !== "connected") return;
 
-    const id = setInterval(() => {
+    const id = window.setInterval(() => {
       setTimers((prev) => {
-        const next = { ...prev };
-        next[currentPlayer] = Math.max(0, next[currentPlayer] - 1);
+        const key = currentPlayer;
+        const next = Math.max(0, prev[key] - 1);
 
-        if (next[currentPlayer] === 0) {
-          const victor: Player = currentPlayer === "red" ? "black" : "red";
-          setWinner(victor);
-          setGameStatus("finished");
-          setStatusMessage(`${victor.toUpperCase()} wins on time.`);
+        if (next === 0) {
+          const timeoutWinner: Player = key === "red" ? "black" : "red";
+          setWinner(timeoutWinner);
+          setMessage(`${capitalize(timeoutWinner)} wins on time!`);
+          registerResult(timeoutWinner);
         }
 
-        return next;
+        return { ...prev, [key]: next };
       });
     }, 1000);
 
-    return () => clearInterval(id);
-  }, [currentPlayer, gameStatus, timerEnabled]);
+    return () => window.clearInterval(id);
+  }, [paused, winner, currentPlayer, mode, onlineStatus, registerResult]);
 
   useEffect(() => {
-    if (!aiTurn || mode === "online") return;
-    if (legalMoves.length === 0) return;
+    if (mode !== "ai" || winner || currentPlayer !== "black") return;
 
-    setIsThinking(true);
-    const timeout = setTimeout(() => {
-      const captures = legalMoves.filter((m) => m.captured);
-      const pool = captures.length > 0 ? captures : legalMoves;
-      const chosen = pool[Math.floor(Math.random() * pool.length)];
-      if (chosen) {
-        makeMove(chosen, "AI");
+    setAiThinking(true);
+    const id = window.setTimeout(() => {
+      const aiMoves = getLegalMoves(board, "black", forcedFrom);
+      if (aiMoves.length === 0) {
+        setWinner("red");
+        setMessage("Red wins. AI has no legal moves.");
+        registerResult("red");
+      } else {
+        const best = getHintMove(aiMoves, board, "black") ?? aiMoves[0];
+        executeMove(best);
       }
-      setIsThinking(false);
-    }, 600);
+      setAiThinking(false);
+    }, 650);
 
-    return () => clearTimeout(timeout);
-  }, [aiTurn, legalMoves, mode]);
+    return () => window.clearTimeout(id);
+  }, [mode, winner, currentPlayer, board, forcedFrom, executeMove, registerResult]);
 
   useEffect(() => {
-    if (gameStatus !== "playing") return;
-    if (legalMoves.length > 0) return;
+    if (mode !== "online" || winner || currentPlayer !== "black" || onlineStatus !== "connected") return;
 
-    const victor: Player = currentPlayer === "red" ? "black" : "red";
-    setWinner(victor);
-    setGameStatus("finished");
-    setStatusMessage(`${victor.toUpperCase()} wins — no legal moves left.`);
-  }, [currentPlayer, gameStatus, legalMoves]);
+    setRemoteThinking(true);
+    const id = window.setTimeout(() => {
+      const unstable = Math.random() < 0.18;
 
-  useEffect(() => {
-    if (!winner || resultRecorded) return;
+      const runMove = () => {
+        const remoteMoves = getLegalMoves(board, "black", forcedFrom);
+        if (remoteMoves.length === 0) {
+          setWinner("red");
+          setMessage("You win! Opponent has no legal moves.");
+          registerResult("red");
+          setRemoteThinking(false);
+          return;
+        }
 
-    setStats((prev) => ({
-      ...prev,
-      gamesPlayed: prev.gamesPlayed + 1,
-      redWins: prev.redWins + (winner === "red" ? 1 : 0),
-      blackWins: prev.blackWins + (winner === "black" ? 1 : 0),
-      puzzleSolved:
-        prev.puzzleSolved + (mode === "puzzle" && winner === "red" ? 1 : 0),
-    }));
-    setResultRecorded(true);
-  }, [winner, resultRecorded, mode]);
+        const pick = getHintMove(remoteMoves, board, "black") ?? remoteMoves[0];
+        executeMove(pick);
+        setRemoteThinking(false);
+      };
 
-  const makeMove = (move: Move, actor: "Player" | "AI" = "Player") => {
-    if (gameStatus !== "playing") return;
-
-    const before = snapshotCurrent();
-    setHistory((h) => [...h, before]);
-    setFuture([]);
-
-    const nextBoard = cloneBoard(board);
-    const movingPiece = nextBoard[move.from.row][move.from.col];
-    if (!movingPiece) return;
-
-    nextBoard[move.from.row][move.from.col] = null;
-    if (move.captured) {
-      nextBoard[move.captured.row][move.captured.col] = null;
-    }
-
-    const becameKing =
-      !movingPiece.king &&
-      ((movingPiece.player === "red" && move.to.row === 0) ||
-        (movingPiece.player === "black" && move.to.row === 7));
-
-    const movedPiece: Piece = {
-      ...movingPiece,
-      king: movingPiece.king || becameKing,
-    };
-
-    nextBoard[move.to.row][move.to.col] = movedPiece;
-
-    const notation = `${actor} ${movingPiece.player.toUpperCase()}: ${coord(move.from)} ${move.captured ? "x" : "→"} ${coord(move.to)}${becameKing ? " (KING)" : ""}`;
-    const nextLog = [notation, ...moveLog].slice(0, 20);
-
-    let nextPlayer: Player = movingPiece.player === "red" ? "black" : "red";
-    let continueFrom: Position | null = null;
-    let nextPuzzleTurns = puzzleTurns;
-
-    if (move.captured) {
-      const chainMoves = getMovesForPiece(nextBoard, move.to.row, move.to.col, movedPiece).filter(
-        (m) => Boolean(m.captured),
-      );
-      if (chainMoves.length > 0) {
-        nextPlayer = movingPiece.player;
-        continueFrom = { ...move.to };
+      if (unstable) {
+        setOnlineStatus("reconnecting");
+        setMessage("Network hiccup... reconnecting opponent.");
+        window.setTimeout(() => {
+          setOnlineStatus("connected");
+          setMessage("Reconnected. Opponent move incoming.");
+          runMove();
+        }, 900);
+      } else {
+        runMove();
       }
-    }
+    }, 950);
 
-    if (mode === "puzzle" && movingPiece.player === "red" && nextPlayer === "black") {
-      nextPuzzleTurns += 1;
-    }
+    return () => window.clearTimeout(id);
+  }, [mode, winner, currentPlayer, onlineStatus, board, forcedFrom, executeMove, registerResult]);
 
-    const pieceCounts = countPieces(nextBoard);
-
-    let nextWinner: Player | null = null;
-    let nextStatus: GameStatus = "playing";
-    let nextMessage = `${nextPlayer.toUpperCase()} to move.`;
-
-    if (pieceCounts.red === 0) {
-      nextWinner = "black";
-      nextStatus = "finished";
-      nextMessage = "BLACK wins by capturing all red pieces.";
-    } else if (pieceCounts.black === 0) {
-      nextWinner = "red";
-      nextStatus = "finished";
-      nextMessage = "RED wins by capturing all black pieces.";
-    } else {
-      const responseMoves = getAllLegalMoves(nextBoard, nextPlayer, continueFrom);
-      if (responseMoves.length === 0) {
-        nextWinner = nextPlayer === "red" ? "black" : "red";
-        nextStatus = "finished";
-        nextMessage = `${nextWinner.toUpperCase()} wins — opponent is blocked.`;
-      }
-    }
-
-    if (mode === "puzzle" && nextStatus === "playing" && nextPuzzleTurns > maxPuzzleTurns) {
-      nextWinner = "black";
-      nextStatus = "finished";
-      nextMessage = "Puzzle failed: turn limit exceeded. Try a cleaner line.";
-    }
-
-    setBoard(nextBoard);
-    setMoveLog(nextLog);
-    setCurrentPlayer(nextPlayer);
-    setForcedFrom(continueFrom);
-    setSelected(continueFrom);
-    setPuzzleTurns(nextPuzzleTurns);
-    setHintMove(null);
-
-    if (continueFrom) {
-      setStatusMessage("Multi-capture available: continue with the same piece.");
-    } else {
-      setStatusMessage(nextMessage);
-    }
-
-    setWinner(nextWinner);
-    setGameStatus(nextStatus);
+  const onSelectMode = (nextMode: GameMode) => {
+    setMode(nextMode);
+    startNewGame(nextMode);
   };
 
   const onSquareClick = (row: number, col: number) => {
-    if (mode === "online") {
-      setStatusMessage("Online matchmaking is not wired yet. Use Local or Single for now.");
-      return;
-    }
-    if (gameStatus !== "playing") return;
-    if (isThinking) return;
+    if (!playerCanInteract) return;
+    if (!isDarkSquare(row, col)) return;
 
-    const targetMove = selectedMoves.find((m) => m.to.row === row && m.to.col === col);
-    if (targetMove) {
-      makeMove(targetMove, "Player");
-      return;
-    }
+    const clicked = board[row][col];
 
-    const piece = board[row][col];
-    if (!piece || piece.player !== currentPlayer) {
-      setSelected(null);
-      return;
+    if (selected) {
+      const move = selectedMoves.find((candidate) => candidate.to.row === row && candidate.to.col === col);
+      if (move) {
+        executeMove(move);
+        return;
+      }
     }
 
-    if (forcedFrom && (forcedFrom.row !== row || forcedFrom.col !== col)) {
-      setStatusMessage("You must continue capturing with the highlighted checker.");
-      return;
+    if (clicked && clicked.player === currentPlayer) {
+      const movable = legalMoves.some((move) => move.from.row === row && move.from.col === col);
+      if (movable) {
+        setSelected({ row, col });
+        setMessage(`${capitalize(currentPlayer)} selected a ${clicked.king ? "king" : "piece"}.`);
+        return;
+      }
     }
 
-    const pieceMoves = legalMoves.filter((m) => m.from.row === row && m.from.col === col);
-    if (pieceMoves.length === 0) {
-      setStatusMessage("That checker has no legal move right now.");
-      setSelected(null);
-      return;
-    }
-
-    setSelected({ row, col });
+    setSelected(null);
   };
 
   const undo = () => {
-    if (history.length === 0) return;
-    const prev = history[history.length - 1];
-    const current = snapshotCurrent();
-    setHistory((h) => h.slice(0, -1));
-    setFuture((f) => [current, ...f]);
-    applySnapshot(prev);
-    setStatusMessage("Undid last move.");
+    if (history.length === 0 || aiThinking || remoteThinking) return;
+    const prev = [...history];
+    const last = prev.pop();
+    if (!last) return;
+
+    setFuture((f) => [makeSnapshot(), ...f]);
+    setHistory(prev);
+    restoreSnapshot(last);
   };
 
   const redo = () => {
-    if (future.length === 0) return;
-    const next = future[0];
-    const current = snapshotCurrent();
-    setFuture((f) => f.slice(1));
-    setHistory((h) => [...h, current]);
-    applySnapshot(next);
-    setStatusMessage("Redid move.");
-  };
+    if (future.length === 0 || aiThinking || remoteThinking) return;
+    const next = [...future];
+    const first = next.shift();
+    if (!first) return;
 
-  const showHint = () => {
-    if (gameStatus !== "playing") return;
-    const hint = pickHintMove(legalMoves);
-    if (!hint) {
-      setStatusMessage("No hint available — no legal moves.");
-      setHintMove(null);
-      return;
-    }
-    setHintMove(hint);
-    setSelected(hint.from);
-    setStatusMessage(`Hint: ${coord(hint.from)} ${hint.captured ? "x" : "→"} ${coord(hint.to)}`);
+    setHistory((h) => [...h, makeSnapshot()]);
+    setFuture(next);
+    restoreSnapshot(first);
   };
 
   const saveGame = () => {
-    const payload = {
-      mode,
-      theme,
-      activePuzzle,
-      maxPuzzleTurns,
-      puzzleDescription,
-      timerEnabled,
-      snapshot: snapshotCurrent(),
-    };
-    localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
-    setStatusMessage("Game saved locally. You can load it anytime.");
+    try {
+      const payload = makeSnapshot();
+      window.localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
+      setMessage("Game saved locally. You can load it anytime.");
+    } catch {
+      setMessage("Save failed. Browser storage may be unavailable.");
+    }
   };
 
   const loadGame = () => {
-    const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) {
-      setStatusMessage("No saved game found yet.");
-      return;
-    }
-
     try {
-      const parsed = JSON.parse(raw) as {
-        mode: GameMode;
-        theme: ThemeName;
-        activePuzzle: number;
-        maxPuzzleTurns: number;
-        puzzleDescription: string;
-        timerEnabled: boolean;
-        snapshot: Snapshot;
-      };
-
-      setMode(parsed.mode);
-      setTheme(parsed.theme);
-      setActivePuzzle(parsed.activePuzzle ?? 0);
-      setMaxPuzzleTurns(parsed.maxPuzzleTurns ?? 2);
-      setPuzzleDescription(parsed.puzzleDescription ?? "");
-      setTimerEnabled(Boolean(parsed.timerEnabled));
-      setHistory([]);
-      setFuture([]);
-      applySnapshot(parsed.snapshot);
-      setStatusMessage("Saved game loaded.");
+      const raw = window.localStorage.getItem(SAVE_KEY);
+      if (!raw) {
+        setMessage("No saved game found.");
+        return;
+      }
+      const parsed = JSON.parse(raw) as Snapshot;
+      restoreSnapshot(parsed);
+      setOnlineStatus(parsed.mode === "online" ? "connected" : "idle");
     } catch {
-      setStatusMessage("Saved game data is corrupted.");
+      setMessage("Load failed. Saved state is invalid.");
     }
   };
 
-  const winRate =
-    stats.gamesPlayed === 0
-      ? 0
-      : Math.round(((stats.redWins + stats.blackWins) / stats.gamesPlayed) * 100);
+  const redPieces = countPieces(board, "red");
+  const blackPieces = countPieces(board, "black");
 
   return (
-    <main className={`min-h-screen ${themeConfig.page} ${themeConfig.text} transition-colors duration-300`}>
-      <div className="mx-auto max-w-7xl px-4 py-6 md:px-8 md:py-8">
-        <header className={`mb-6 rounded-2xl p-5 shadow-sm ${themeConfig.card}`}>
-          <h1 className="text-2xl font-extrabold tracking-tight md:text-3xl">Fun Checkers Arena</h1>
-          <p className="mt-1 text-sm opacity-80 md:text-base">
-            Fast games, hints, timer pressure, save/load, puzzle challenges, and smart AI.
-          </p>
-
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
+    <section
+      className="min-h-screen px-4 py-6 md:px-8"
+      style={{ backgroundColor: palette.appBg, color: palette.appText }}
+    >
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
+        <header className="rounded-2xl border p-5 shadow-xl" style={{ backgroundColor: palette.panel, borderColor: palette.panelBorder }}>
+          <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide opacity-70">Mode</label>
-              <div className="flex flex-wrap gap-2">
-                {(Object.keys(MODE_LABELS) as GameMode[]).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => {
-                      setMode(m);
-                      newGame(m, m === "puzzle" ? activePuzzle : 0);
-                    }}
-                    className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
-                      mode === m ? "bg-indigo-600 text-white" : "bg-slate-200/60 text-slate-900 hover:bg-slate-300/70"
-                    }`}
-                  >
-                    {MODE_LABELS[m]}
-                  </button>
-                ))}
-              </div>
+              <h1 className="text-3xl font-bold tracking-tight">Fun Checkers Arena</h1>
+              <p className="mt-1 text-sm opacity-90">
+                Single-player AI, local multiplayer, online-style matchmaking, and puzzle challenges in one board.
+              </p>
             </div>
-
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide opacity-70">Theme</label>
-              <select
-                value={theme}
-                onChange={(e) => setTheme(e.target.value as ThemeName)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-              >
-                <option value="minimal">Minimal / Clean</option>
-                <option value="dark">Dark / Modern</option>
-                <option value="playful">Playful / Colorful</option>
-                <option value="classic">Classic / Wooden</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide opacity-70">Actions</label>
-              <div className="flex flex-wrap gap-2">
-                <button onClick={() => newGame(mode, activePuzzle)} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-500">
-                  New Game
+            <div className="flex flex-wrap gap-2 text-xs md:text-sm">
+              {(["local", "ai", "online", "puzzle"] as GameMode[]).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => onSelectMode(m)}
+                  className={`rounded-full border px-3 py-1.5 transition ${mode === m ? "font-semibold" : "opacity-80 hover:opacity-100"}`}
+                  style={{ borderColor: palette.panelBorder, backgroundColor: mode === m ? palette.accent : "transparent", color: mode === m ? "#001018" : palette.appText }}
+                >
+                  {m === "ai" ? "Single vs AI" : m === "local" ? "Local 2P" : m === "online" ? "Online" : "Puzzle"}
                 </button>
-                <button onClick={saveGame} className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600">
-                  Save
-                </button>
-                <button onClick={loadGame} className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-600">
-                  Load
-                </button>
-              </div>
+              ))}
             </div>
           </div>
         </header>
 
-        <section className="grid gap-6 lg:grid-cols-[1fr_320px]">
-          <div className={`rounded-2xl p-4 shadow-sm ${themeConfig.card}`}>
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-semibold">
-                Turn: <span className={themeConfig.accent}>{currentPlayer.toUpperCase()}</span>
-                {isThinking ? " • AI is thinking..." : ""}
-              </p>
-              <p className="text-sm opacity-80">Moves: {moveLog.length}</p>
-            </div>
-
-            <div className="mb-4 flex flex-wrap gap-2">
-              <button
-                onClick={undo}
-                disabled={history.length === 0}
-                className="rounded-md bg-slate-600 px-3 py-2 text-xs font-semibold text-white enabled:hover:bg-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Undo
-              </button>
-              <button
-                onClick={redo}
-                disabled={future.length === 0}
-                className="rounded-md bg-slate-600 px-3 py-2 text-xs font-semibold text-white enabled:hover:bg-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Redo
-              </button>
-              <button onClick={showHint} className="rounded-md bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-500">
-                Move Hint
-              </button>
-              <button
-                onClick={() => setTimerEnabled((v) => !v)}
-                className="rounded-md bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-500"
-              >
-                Timer: {timerEnabled ? "On" : "Off"}
-              </button>
-            </div>
-
-            <div className="relative mx-auto max-w-[560px]">
-              <div className="grid grid-cols-8 overflow-hidden rounded-xl border-4 border-slate-900/30 shadow-lg">
-                {board.map((row, rowIdx) =>
-                  row.map((cell, colIdx) => {
-                    const dark = (rowIdx + colIdx) % 2 === 1;
-                    const isSelected = selected?.row === rowIdx && selected?.col === colIdx;
-                    const legalDest = selectedMoves.some(
-                      (m) => m.to.row === rowIdx && m.to.col === colIdx,
-                    );
-                    const isHintFrom = hintMove?.from.row === rowIdx && hintMove?.from.col === colIdx;
-                    const isHintTo = hintMove?.to.row === rowIdx && hintMove?.to.col === colIdx;
-
-                    return (
-                      <button
-                        key={`${rowIdx}-${colIdx}`}
-                        type="button"
-                        onClick={() => onSquareClick(rowIdx, colIdx)}
-                        className={`relative aspect-square ${dark ? themeConfig.boardDark : themeConfig.boardLight} transition ${
-                          isSelected ? "ring-4 ring-cyan-400 ring-inset" : ""
-                        } ${isHintFrom ? "ring-4 ring-emerald-400 ring-inset" : ""} ${isHintTo ? "outline outline-4 outline-emerald-300" : ""}`}
-                        aria-label={`Row ${rowIdx + 1} Col ${colIdx + 1}`}
-                      >
-                        {legalDest && !cell && (
-                          <span className="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-cyan-300/90" />
-                        )}
-
-                        {cell && (
-                          <span
-                            className={`absolute left-1/2 top-1/2 flex h-[72%] w-[72%] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-gradient-to-br ${
-                              cell.player === "red" ? themeConfig.pieceRed : themeConfig.pieceBlack
-                            } shadow-lg`}
-                          >
-                            {cell.king ? (
-                              <span className="text-lg text-yellow-200" aria-hidden>
-                                ♛
-                              </span>
-                            ) : null}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  }),
-                )}
+        <div className="grid gap-6 lg:grid-cols-[1fr_330px]">
+          <div className="rounded-2xl border p-4 shadow-2xl" style={{ backgroundColor: palette.panel, borderColor: palette.panelBorder }}>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm opacity-80">Turn {moveCount + 1}</p>
+                <h2 className="text-xl font-semibold">{winner ? `${capitalize(winner)} Wins` : `${capitalize(currentPlayer)} to move`}</h2>
               </div>
+              <div className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: palette.panelBorder }}>
+                {message}
+              </div>
+            </div>
 
-              {mode === "online" && (
-                <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/65 p-4 text-center text-white">
-                  <div>
-                    <p className="text-lg font-bold">Online Multiplayer Lobby</p>
-                    <p className="mt-1 text-sm opacity-90">
-                      UI is ready, but realtime server wiring is pending. Start Local 2P to play now.
-                    </p>
-                  </div>
-                </div>
+            <div className="mx-auto grid w-full max-w-[640px] grid-cols-8 overflow-hidden rounded-xl border-2" style={{ borderColor: palette.panelBorder }}>
+              {board.map((row, rowIndex) =>
+                row.map((cell, colIndex) => {
+                  const dark = isDarkSquare(rowIndex, colIndex);
+                  const isSelected = selected ? selected.row === rowIndex && selected.col === colIndex : false;
+                  const isMoveTarget = selectedMoves.some((move) => move.to.row === rowIndex && move.to.col === colIndex);
+                  const isHintFrom = hintMove ? hintMove.from.row === rowIndex && hintMove.from.col === colIndex : false;
+                  const isHintTo = hintMove ? hintMove.to.row === rowIndex && hintMove.to.col === colIndex : false;
+
+                  return (
+                    <button
+                      key={`${rowIndex}-${colIndex}`}
+                      type="button"
+                      onClick={() => onSquareClick(rowIndex, colIndex)}
+                      className="relative aspect-square transition-transform duration-150 hover:scale-[1.01] focus:outline-none"
+                      style={{
+                        backgroundColor: dark ? palette.boardDark : palette.boardLight,
+                        opacity: dark ? 1 : 0.85,
+                        cursor: playerCanInteract && dark ? "pointer" : "default",
+                      }}
+                      aria-label={`Square ${rowIndex + 1}, ${colIndex + 1}`}
+                    >
+                      {showCoords && dark && (
+                        <span className="absolute left-1 top-1 text-[10px] font-semibold opacity-65">
+                          {String.fromCharCode(65 + colIndex)}{BOARD_SIZE - rowIndex}
+                        </span>
+                      )}
+
+                      {isMoveTarget && (
+                        <span
+                          className="absolute left-1/2 top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full"
+                          style={{ backgroundColor: palette.accent }}
+                        />
+                      )}
+
+                      {(isHintFrom || isHintTo) && hintsOn && (
+                        <span className="absolute inset-1 rounded-md border-2" style={{ borderColor: palette.accent }} />
+                      )}
+
+                      {isSelected && (
+                        <span className="absolute inset-1 rounded-md border-2 border-yellow-300 shadow-[0_0_18px_rgba(253,224,71,0.45)]" />
+                      )}
+
+                      {cell && (
+                        <span
+                          className="absolute left-1/2 top-1/2 grid h-[72%] w-[72%] -translate-x-1/2 -translate-y-1/2 place-content-center rounded-full border-2 text-lg font-bold shadow-lg"
+                          style={{
+                            backgroundColor: cell.player === "red" ? palette.redPiece : palette.blackPiece,
+                            borderColor: "rgba(255,255,255,0.45)",
+                            color: cell.player === "red" ? "#fff5f5" : "#f5f5f5",
+                          }}
+                        >
+                          {cell.king ? "♛" : ""}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })
               )}
             </div>
 
-            <p className="mt-4 rounded-lg bg-slate-800/10 px-3 py-2 text-sm">{statusMessage}</p>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <button onClick={() => startNewGame(mode)} className="rounded-lg border px-3 py-2 text-sm hover:opacity-90" style={{ borderColor: palette.panelBorder }}>
+                New Match
+              </button>
+              <button onClick={undo} disabled={history.length === 0} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40" style={{ borderColor: palette.panelBorder }}>
+                Undo
+              </button>
+              <button onClick={redo} disabled={future.length === 0} className="rounded-lg border px-3 py-2 text-sm disabled:opacity-40" style={{ borderColor: palette.panelBorder }}>
+                Redo
+              </button>
+              <button onClick={saveGame} className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: palette.panelBorder }}>
+                Save
+              </button>
+              <button onClick={loadGame} className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: palette.panelBorder }}>
+                Load
+              </button>
+              <button onClick={() => setHintsOn((v) => !v)} className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: palette.panelBorder }}>
+                {hintsOn ? "Hide Hints" : "Show Hints"}
+              </button>
+              <button onClick={() => setShowCoords((v) => !v)} className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: palette.panelBorder }}>
+                {showCoords ? "Hide Coords" : "Show Coords"}
+              </button>
+              <button onClick={() => setPaused((v) => !v)} className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: palette.panelBorder }}>
+                {paused ? "Resume" : "Pause"}
+              </button>
+            </div>
           </div>
 
           <aside className="space-y-4">
-            <div className={`rounded-2xl p-4 shadow-sm ${themeConfig.card}`}>
-              <h2 className="text-sm font-bold uppercase tracking-wide opacity-80">Timers</h2>
-              <div className="mt-3 space-y-2 text-sm">
-                <div className="flex items-center justify-between">
-                  <span>Red</span>
-                  <span className="font-mono">{formatTime(timers.red)}</span>
+            <section className="rounded-2xl border p-4" style={{ backgroundColor: palette.panel, borderColor: palette.panelBorder }}>
+              <h3 className="text-lg font-semibold">Live Status</h3>
+              <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                <div className="rounded-lg border p-2" style={{ borderColor: palette.panelBorder }}>
+                  <p className="opacity-75">Red</p>
+                  <p className="font-mono text-lg">{formatTime(timers.red)}</p>
+                  <p className="opacity-75">Pieces: {redPieces}</p>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span>Black</span>
-                  <span className="font-mono">{formatTime(timers.black)}</span>
-                </div>
-              </div>
-            </div>
-
-            {mode === "puzzle" && (
-              <div className={`rounded-2xl p-4 shadow-sm ${themeConfig.card}`}>
-                <h2 className="text-sm font-bold uppercase tracking-wide opacity-80">Puzzle Challenge</h2>
-                <p className="mt-2 text-sm">{puzzleDescription}</p>
-                <p className="mt-2 text-xs opacity-80">
-                  Red turns used: {puzzleTurns}/{maxPuzzleTurns}
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {Array.from({ length: 5 }).map((_, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => {
-                        setActivePuzzle(idx);
-                        newGame("puzzle", idx);
-                      }}
-                      className={`rounded-md px-2 py-1 text-xs font-semibold ${
-                        activePuzzle === idx
-                          ? "bg-indigo-600 text-white"
-                          : "bg-slate-200 text-slate-800 hover:bg-slate-300"
-                      }`}
-                    >
-                      Puzzle {idx + 1}
-                    </button>
-                  ))}
+                <div className="rounded-lg border p-2" style={{ borderColor: palette.panelBorder }}>
+                  <p className="opacity-75">Black</p>
+                  <p className="font-mono text-lg">{formatTime(timers.black)}</p>
+                  <p className="opacity-75">Pieces: {blackPieces}</p>
                 </div>
               </div>
-            )}
-
-            <div className={`rounded-2xl p-4 shadow-sm ${themeConfig.card}`}>
-              <h2 className="text-sm font-bold uppercase tracking-wide opacity-80">Stats</h2>
-              <ul className="mt-3 space-y-1 text-sm">
-                <li>Games played: {stats.gamesPlayed}</li>
-                <li>Red wins: {stats.redWins}</li>
-                <li>Black wins: {stats.blackWins}</li>
-                <li>Puzzles solved: {stats.puzzleSolved}</li>
-                <li>Win result rate: {winRate}%</li>
-              </ul>
-            </div>
-
-            <div className={`rounded-2xl p-4 shadow-sm ${themeConfig.card}`}>
-              <h2 className="text-sm font-bold uppercase tracking-wide opacity-80">Recent Moves</h2>
-              <div className="mt-2 max-h-48 space-y-1 overflow-auto pr-1 text-xs">
-                {moveLog.length === 0 ? (
-                  <p className="opacity-70">No moves yet.</p>
-                ) : (
-                  moveLog.map((entry, idx) => (
-                    <p key={`${entry}-${idx}`} className="rounded bg-slate-800/10 px-2 py-1">
-                      {entry}
-                    </p>
-                  ))
+              <div className="mt-3 text-sm">
+                {mode === "ai" && <p>{aiThinking ? "AI thinking..." : "AI ready."}</p>}
+                {mode === "online" && (
+                  <p>
+                    Online status: <span className="font-semibold">{onlineStatus}</span>
+                    {remoteThinking ? " · Opponent move incoming" : ""}
+                  </p>
+                )}
+                {mode === "puzzle" && (
+                  <p>
+                    Puzzle moves left: <span className="font-semibold">{puzzleMovesLeft}</span>
+                  </p>
                 )}
               </div>
-            </div>
+            </section>
+
+            <section className="rounded-2xl border p-4" style={{ backgroundColor: palette.panel, borderColor: palette.panelBorder }}>
+              <h3 className="text-lg font-semibold">Themes</h3>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                {(["minimal", "dark", "playful", "classic", "custom"] as ThemeName[]).map((name) => (
+                  <button
+                    key={name}
+                    onClick={() => setTheme(name)}
+                    className={`rounded-lg border px-2 py-2 text-left transition ${theme === name ? "font-semibold" : "opacity-80"}`}
+                    style={{ borderColor: palette.panelBorder, backgroundColor: theme === name ? palette.accent : "transparent", color: theme === name ? "#001018" : palette.appText }}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+
+              {theme === "custom" && (
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                  {(
+                    [
+                      ["boardLight", "Light"],
+                      ["boardDark", "Dark"],
+                      ["redPiece", "Red"],
+                      ["blackPiece", "Black"],
+                      ["accent", "Accent"],
+                    ] as Array<[keyof ThemePalette, string]>
+                  ).map(([key, label]) => (
+                    <label key={key} className="flex items-center justify-between rounded border px-2 py-1" style={{ borderColor: palette.panelBorder }}>
+                      <span>{label}</span>
+                      <input
+                        type="color"
+                        value={customTheme[key]}
+                        onChange={(e) => setCustomTheme((prev) => ({ ...prev, [key]: e.target.value }))}
+                        className="h-6 w-8 cursor-pointer border-0 bg-transparent"
+                        aria-label={`${label} color`}
+                      />
+                    </label>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-2xl border p-4" style={{ backgroundColor: palette.panel, borderColor: palette.panelBorder }}>
+              <h3 className="text-lg font-semibold">Puzzle Controls</h3>
+              <p className="mt-1 text-xs opacity-80">Switching puzzle restarts the puzzle mode board instantly.</p>
+              <div className="mt-3 space-y-2">
+                {PUZZLES.map((puzzle, index) => (
+                  <button
+                    key={puzzle.id}
+                    onClick={() => {
+                      setPuzzleIndex(index);
+                      if (mode === "puzzle") {
+                        window.setTimeout(() => startNewGame("puzzle"), 0);
+                      }
+                    }}
+                    className="w-full rounded-lg border px-3 py-2 text-left text-sm"
+                    style={{ borderColor: palette.panelBorder, backgroundColor: puzzleIndex === index ? "rgba(255,255,255,0.08)" : "transparent" }}
+                  >
+                    <p className="font-semibold">{puzzle.name}</p>
+                    <p className="text-xs opacity-80">{puzzle.description}</p>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="rounded-2xl border p-4" style={{ backgroundColor: palette.panel, borderColor: palette.panelBorder }}>
+              <h3 className="text-lg font-semibold">Stats & Win Tracking</h3>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                <div className="rounded border p-2" style={{ borderColor: palette.panelBorder }}>
+                  <p className="opacity-75">Games</p>
+                  <p className="text-lg font-bold">{stats.gamesPlayed}</p>
+                </div>
+                <div className="rounded border p-2" style={{ borderColor: palette.panelBorder }}>
+                  <p className="opacity-75">Red Wins</p>
+                  <p className="text-lg font-bold">{stats.redWins}</p>
+                </div>
+                <div className="rounded border p-2" style={{ borderColor: palette.panelBorder }}>
+                  <p className="opacity-75">Black Wins</p>
+                  <p className="text-lg font-bold">{stats.blackWins}</p>
+                </div>
+                <div className="rounded border p-2" style={{ borderColor: palette.panelBorder }}>
+                  <p className="opacity-75">Draws</p>
+                  <p className="text-lg font-bold">{stats.draws}</p>
+                </div>
+              </div>
+              <div className="mt-3 text-xs opacity-85">
+                <p>Completed by mode:</p>
+                <ul className="mt-1 space-y-1">
+                  <li>Local: {stats.completedByMode.local}</li>
+                  <li>AI: {stats.completedByMode.ai}</li>
+                  <li>Online: {stats.completedByMode.online}</li>
+                  <li>Puzzle: {stats.completedByMode.puzzle}</li>
+                </ul>
+              </div>
+            </section>
           </aside>
-        </section>
+        </div>
       </div>
-    </main>
+    </section>
   );
 }
